@@ -106,6 +106,21 @@ func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
 }
 
+// ParsePackageName parses only the package name from a file. It avoids AST/DST decoration overhead.
+func ParsePackageName(filePath string) (string, error) {
+	fset := token.NewFileSet()
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", ex.Wrapf(err, "failed to open file %s", filePath)
+	}
+	defer file.Close()
+	astFile, err := parser.ParseFile(fset, filepath.Base(filePath), file, parser.PackageClauseOnly)
+	if err != nil {
+		return "", ex.Wrapf(err, "failed to parse package name from file %s", filePath)
+	}
+	return astFile.Name.Name, nil
+}
+
 // ParseFileFast parses the AST from a file, including comments as node
 // decorations. Use this version if you only need to read information from
 // the AST without writing it back to a file.

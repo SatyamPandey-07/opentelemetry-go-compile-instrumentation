@@ -210,14 +210,13 @@ func (sp *SetupPhase) runMatch(
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			// TODO: Optimize package name discovery for file-only rules to avoid
-			// parsing source files on the hot path.
-			tree, err := ast.ParseFileOnlyPackage(dep.Sources[0])
+			name, err := ast.ParsePackageName(dep.Sources[0])
 			if err != nil {
 				return nil, err
 			}
-			set.SetPackageName(tree.Name.Name)
+			set.SetPackageName(name)
 		}
+
 		return set, nil
 	}
 
