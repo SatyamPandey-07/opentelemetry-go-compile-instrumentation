@@ -40,7 +40,7 @@ func TestParsePackageName_InvalidGoFile(t *testing.T) {
 }
 
 func BenchmarkParseFileOnlyPackage(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := ParseFileOnlyPackage("parser.go")
 		if err != nil {
 			b.Fatal(err)
@@ -49,11 +49,10 @@ func BenchmarkParseFileOnlyPackage(b *testing.B) {
 }
 
 func BenchmarkParsePackageName(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := ParsePackageName("parser.go")
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
