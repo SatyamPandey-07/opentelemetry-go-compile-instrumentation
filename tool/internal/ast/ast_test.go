@@ -38,3 +38,22 @@ func TestParsePackageName_InvalidGoFile(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse package name")
 }
+
+func BenchmarkParseFileOnlyPackage(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_, err := ParseFileOnlyPackage("parser.go")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParsePackageName(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_, err := ParsePackageName("parser.go")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
