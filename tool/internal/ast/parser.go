@@ -43,6 +43,11 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
+	// Skip DST decoration when only the package clause is needed; decoration
+	// is expensive and unnecessary when the caller only reads astFile.Name.
+	if mode == parser.PackageClauseOnly {
+		return &dst.File{Name: &dst.Ident{Name: astFile.Name.Name}}, nil
+	}
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to decorate file %s", filePath)
@@ -100,19 +105,14 @@ func WriteFile(filePath string, root *dst.File) error {
 	return nil
 }
 
-// ParsePackageName parses only the package name from a file. It avoids AST/DST decoration overhead.
+// ParsePackageName parses only the package name from a file, skipping
+// DST decoration for efficiency.
 func ParsePackageName(filePath string) (string, error) {
-	fset := token.NewFileSet()
-	file, err := os.Open(filePath)
+	f, err := NewAstParser().Parse(filePath, parser.PackageClauseOnly)
 	if err != nil {
-		return "", ex.Wrapf(err, "failed to open file %s", filePath)
+		return "", err
 	}
-	defer file.Close()
-	astFile, err := parser.ParseFile(fset, filepath.Base(filePath), file, parser.PackageClauseOnly)
-	if err != nil {
-		return "", ex.Wrapf(err, "failed to parse package name from file %s", filePath)
-	}
-	return astFile.Name.Name, nil
+	return f.Name.Name, nil
 }
 
 // ParseFileFast parses the AST from a file, including comments as node
