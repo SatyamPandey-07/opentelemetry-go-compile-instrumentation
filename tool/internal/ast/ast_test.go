@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"go/parser"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,9 +40,11 @@ func TestParsePackageName_InvalidGoFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse package name")
 }
 
-func BenchmarkParseFileOnlyPackage(b *testing.B) {
+// BenchmarkAstParserWithDecoration benchmarks package name extraction via the
+// full AstParser pipeline (go/parser + DST decoration).
+func BenchmarkAstParserWithDecoration(b *testing.B) {
 	for range b.N {
-		_, err := ParseFileOnlyPackage("parser.go")
+		_, err := NewAstParser().Parse("parser.go", parser.PackageClauseOnly)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -100,12 +100,6 @@ func WriteFile(filePath string, root *dst.File) error {
 	return nil
 }
 
-// ParseFileOnlyPackage parses the AST from a file. Use it if you only need to
-// read the package name from the AST.
-func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
-	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
-}
-
 // ParsePackageName parses only the package name from a file. It avoids AST/DST decoration overhead.
 func ParsePackageName(filePath string) (string, error) {
 	fset := token.NewFileSet()
