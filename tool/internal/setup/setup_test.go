@@ -493,3 +493,34 @@ func TestExtractBuildFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSetup(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	// In a clean directory, isSetup should return false
+	require.False(t, isSetup())
+
+	// Create the build temp directory first so Commit doesn't fail
+	err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
+	require.NoError(t, err)
+
+	// Create stateManager and commit to create the state file
+	stateManager := NewStateManager()
+	err = stateManager.Commit()
+	require.NoError(t, err)
+
+	// Since state.json now exists, isSetup should return true
+	require.True(t, isSetup())
+
+	// If we write invalid JSON to state.json, isSetup should return false
+	stateFile := util.GetBuildTemp(stateFileName)
+	err = os.WriteFile(stateFile, []byte("{invalid json"), 0o644)
+	require.NoError(t, err)
+	require.False(t, isSetup())
+
+	// Remove the state file, isSetup should return false
+	err = os.Remove(stateFile)
+	require.NoError(t, err)
+	require.False(t, isSetup())
+}

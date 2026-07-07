@@ -46,8 +46,8 @@ func (sp *SetupPhase) keepForDebug(srcPath string) {
 
 // This function can be used to check if the setup has been completed.
 func isSetup() bool {
-	// TODO: Implement Task
-	return false
+	stateManager, err := LoadStateManager()
+	return err == nil && stateManager != nil
 }
 
 // flagsWithPathValues contains flags that accept a value from "go build" command.
