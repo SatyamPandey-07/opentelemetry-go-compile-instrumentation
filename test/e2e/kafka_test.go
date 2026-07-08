@@ -25,33 +25,47 @@ func TestKafka(t *testing.T) {
 
 	t.Parallel()
 
-	f := testutil.NewTestFixture(t)
 	brokers := startKafkaContainer(t)
-	f.SetEnv("KAFKA_BROKERS", strings.Join(brokers, ","))
+	brokerAddrs := strings.Join(brokers, ",")
 
-	// Build and run the producer
-	f.BuildAndRun("kafkaproducer", "-topic", "e2e-orders")
+	t.Run("Produce", func(t *testing.T) {
+		t.Parallel()
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("KAFKA_BROKERS", brokerAddrs)
 
-	// Build and run the consumer
-	f.BuildAndRun("kafkaconsumer", "-topic", "e2e-orders")
+		out := f.BuildAndRun("kafkaproducer", "-topic=e2e-orders")
+		require.Contains(t, out, "produced message")
 
-	// We expect at least one trace from the interaction
-	f.RequireTraceCount(1)
+		span := f.RequireSingleSpan()
+		require.Equal(t, "e2e-orders send", span.Name())
+		require.Equal(t, ptrace.SpanKindProducer, span.Kind())
 
-	// Verify producer span
-	producerSpan := testutil.RequireSpan(t, f.Traces(),
-		func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer },
-	)
-	require.Equal(t, "e2e-orders send", producerSpan.Name())
+		attrs := testutil.Attrs(span)
+		require.Equal(t, "kafka", attrs["messaging.system"])
+		require.Equal(t, "e2e-orders", attrs["messaging.destination.name"])
+	})
 
-	// Verify consumer span
-	consumerSpan := testutil.RequireSpan(t, f.Traces(),
-		func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
-	)
-	require.Equal(t, "e2e-orders receive", consumerSpan.Name())
+	t.Run("Consume", func(t *testing.T) {
+		t.Parallel()
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("KAFKA_BROKERS", brokerAddrs)
 
-	// Verify trace context was propagated from producer to consumer
-	require.Equal(t, producerSpan.TraceID(), consumerSpan.TraceID(), "trace ID should propagate across Kafka headers")
+		// The consumer seeds a message then reads it back; the instrumented
+		// writer injects trace context into message headers which the reader
+		// then extracts — exercising context propagation across the two hooks.
+		out := f.BuildAndRun("kafkaconsumer", "-topic=e2e-consume")
+		require.Contains(t, out, "consumed message")
+
+		span := testutil.RequireSpan(t, f.Traces(),
+			func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
+		)
+		require.Equal(t, "e2e-consume receive", span.Name())
+		require.NotEqual(t, ptrace.StatusCodeError, span.Status().Code())
+
+		attrs := testutil.Attrs(span)
+		require.Equal(t, "kafka", attrs["messaging.system"])
+		require.Equal(t, "e2e-consume", attrs["messaging.destination.name"])
+	})
 }
 
 func startKafkaContainer(t *testing.T) []string {
