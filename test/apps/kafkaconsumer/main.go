@@ -19,6 +19,7 @@ import (
 
 var (
 	topic = flag.String("topic", "orders", "kafka topic")
+	seed  = flag.Bool("seed", true, "seed a message before reading (disable for cross-process E2E tests)")
 )
 
 func brokers() []string {
@@ -34,10 +35,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Seed a message so the reader has something to consume. The instrumented
-	// writer injects trace context into the message headers, which the reader
-	// then extracts — exercising context propagation across the two hooks.
-	writeMessage(ctx, "order-1", "hello kafka")
+	// Optionally seed a message so the reader has something to consume.
+	// When seed=false (used by E2E tests), the producer binary is expected
+	// to have already written the message so that trace context propagates
+	// across two separate instrumented processes.
+	if *seed {
+		writeMessage(ctx, "order-1", "hello kafka")
+	}
 
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     brokers(),

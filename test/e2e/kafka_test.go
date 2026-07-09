@@ -18,54 +18,70 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
+// TestKafka is a true cross-process E2E test that verifies trace context
+// propagation between a Kafka producer and consumer binary.
+//
+// The producer (kafkaproducer) writes a message with an instrumented
+// kafka.Writer, which injects a W3C traceparent header into the Kafka message.
+// The consumer (kafkaconsumer) reads that same message with an instrumented
+// kafka.Reader, which extracts the header and links its span to the producer's
+// trace. Both processes export to the same in-process OTLP collector, so a
+// single trace with two spans (one Producer, one Consumer) is produced.
 func TestKafka(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("kafka testcontainer not supported on windows")
 	}
 
-	t.Parallel()
-
 	brokers := startKafkaContainer(t)
 	brokerAddrs := strings.Join(brokers, ",")
 
-	t.Run("Produce", func(t *testing.T) {
-		t.Parallel()
-		f := testutil.NewTestFixture(t)
-		f.SetEnv("KAFKA_BROKERS", brokerAddrs)
+	// Single fixture so both processes export to the same collector — this
+	// allows cross-span trace correlation assertions below.
+	f := testutil.NewTestFixture(t)
+	f.SetEnv("KAFKA_BROKERS", brokerAddrs)
 
-		out := f.BuildAndRun("kafkaproducer", "-topic=e2e-orders")
-		require.Contains(t, out, "produced message")
+	// Build both binaries (instrumented by otelc) and run them sequentially on
+	// the same topic so the producer's traceparent header lands in the message
+	// that the consumer reads.
+	producerOut := f.BuildAndRun("kafkaproducer", "-topic=e2e-kafka")
+	require.Contains(t, producerOut, "produced message")
 
-		span := f.RequireSingleSpan()
-		require.Equal(t, "e2e-orders send", span.Name())
-		require.Equal(t, ptrace.SpanKindProducer, span.Kind())
+	consumerOut := f.BuildAndRun("kafkaconsumer", "-topic=e2e-kafka", "-seed=false")
+	require.Contains(t, consumerOut, "consumed message")
 
-		attrs := testutil.Attrs(span)
-		require.Equal(t, "kafka", attrs["messaging.system"])
-		require.Equal(t, "e2e-orders", attrs["messaging.destination.name"])
-	})
+	// --- Trace-level correlation ---
+	// Both spans must share the same trace ID, proving that the W3C traceparent
+	// header injected by the producer was correctly extracted by the consumer.
+	f.RequireTraceCount(1)    // one distributed trace
+	f.RequireSpansPerTrace(2) // producer span + consumer span
 
-	t.Run("Consume", func(t *testing.T) {
-		t.Parallel()
-		f := testutil.NewTestFixture(t)
-		f.SetEnv("KAFKA_BROKERS", brokerAddrs)
+	traces := f.Traces()
 
-		// The consumer seeds a message then reads it back; the instrumented
-		// writer injects trace context into message headers which the reader
-		// then extracts — exercising context propagation across the two hooks.
-		out := f.BuildAndRun("kafkaconsumer", "-topic=e2e-consume")
-		require.Contains(t, out, "consumed message")
+	// --- Producer span ---
+	producerSpan := testutil.RequireSpan(t, traces,
+		func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer },
+	)
+	require.Equal(t, "e2e-kafka send", producerSpan.Name())
+	require.NotEqual(t, ptrace.StatusCodeError, producerSpan.Status().Code())
 
-		span := testutil.RequireSpan(t, f.Traces(),
-			func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
-		)
-		require.Equal(t, "e2e-consume receive", span.Name())
-		require.NotEqual(t, ptrace.StatusCodeError, span.Status().Code())
+	pAttrs := testutil.Attrs(producerSpan)
+	require.Equal(t, "kafka", pAttrs["messaging.system"])
+	require.Equal(t, "e2e-kafka", pAttrs["messaging.destination.name"])
+	require.Equal(t, "send", pAttrs["messaging.operation.name"])
+	require.Equal(t, "send", pAttrs["messaging.operation.type"])
 
-		attrs := testutil.Attrs(span)
-		require.Equal(t, "kafka", attrs["messaging.system"])
-		require.Equal(t, "e2e-consume", attrs["messaging.destination.name"])
-	})
+	// --- Consumer span ---
+	consumerSpan := testutil.RequireSpan(t, traces,
+		func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
+	)
+	require.Equal(t, "e2e-kafka receive", consumerSpan.Name())
+	require.NotEqual(t, ptrace.StatusCodeError, consumerSpan.Status().Code())
+
+	cAttrs := testutil.Attrs(consumerSpan)
+	require.Equal(t, "kafka", cAttrs["messaging.system"])
+	require.Equal(t, "e2e-kafka", cAttrs["messaging.destination.name"])
+	require.Equal(t, "receive", cAttrs["messaging.operation.name"])
+	require.Equal(t, "receive", cAttrs["messaging.operation.type"])
 }
 
 func startKafkaContainer(t *testing.T) []string {
